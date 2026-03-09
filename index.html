@@ -1413,7 +1413,7 @@
                 });
             });
 
-            companies = [new Company('player', '👑 My Coffee Inc.', 'player', 20000000, 'coffee', 100, false, 10000)];
+            companies = [new Company('player', '👑 My Coffee Inc.', 'player', 200000000000, 'coffee', 100, false, 10000)];
             companies[0].country = 'JP';
             initAdCompanies();
             initBrandSystem();
@@ -5561,7 +5561,13 @@ ${ds.desc}`)) {
 
                 return `<tr onclick="selectMarketCompany('${c.id}')" style="border-bottom:1px solid var(--border);cursor:pointer;background:${isSel?'#eff6ff':'transparent'};transition:0.15s;">
                     <td style="padding:10px 12px;">
-                        <div style="font-weight:900;font-size:13px;color:${isSel?'var(--primary)':'var(--text-main)'};margin-bottom:3px;">${badge} ${(window.getCompanyDisplayName?window.getCompanyDisplayName(c):c.name.replace(/\[.*?\]\s*/g,'')).substring(0,22)}${o>0?' 🔵':''}</div>
+                        ${(()=>{
+                            let _rawName = c.name;
+                            let _parentMatch = _rawName.match(/\[(.+?)傘下\]/);
+                            let _cleanName = _rawName.replace(/\[.*?\]\s*/g,'');
+                            let _parentBadge = _parentMatch ? `<span style="font-size:9px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;padding:1px 5px;border-radius:4px;font-weight:900;margin-right:3px;">${_parentMatch[1].substring(0,6)}傘下</span>` : '';
+                            return `<div style="font-weight:900;font-size:13px;color:${isSel?'var(--primary)':'var(--text-main)'};margin-bottom:3px;">${badge} ${_parentBadge}${_cleanName.substring(0,18)}${o>0?' 🔵':''}</div>`;
+                        })()}
                         <div style="display:flex;flex-wrap:wrap;gap:2px;">${holderBadges||'<span style="font-size:9px;color:#ccc;">浮動株</span>'}</div>
                     </td>
                     <td style="text-align:right;padding:10px 8px;font-size:13px;font-weight:900;color:${priceColor};">¥${c.stockPrice.toLocaleString()}</td>
@@ -6470,7 +6476,7 @@ ${ds.desc}`)) {
             let playerShares = target.shareholders['player'] || 0;
             let ownerPct = (playerShares / target.shares * 100).toFixed(2);
 
-            let tabBtns = [['profile','📊 株主・概要'],['finance','💹 財務']].map(([k,l]) =>
+            let tabBtns = [['profile','📊 株主・概要'],['finance','💹 財務'],['group','🏢 グループ']].map(([k,l]) =>
                 `<button onclick="window._companyModalTab='${k}'; openCompanyModal('${cid}');"
                 style="background:none;border:none;cursor:pointer;padding:10px 18px;font-size:13px;font-weight:700;
                 color:${tab===k?'#2563eb':'#94a3b8'};
@@ -6650,6 +6656,96 @@ ${ds.desc}`)) {
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </div>`;
+            } else if (tab === 'group') {
+                // ── グループツリータブ ──
+                // グループのルート企業を探す
+                function _findRoot(co) {
+                    let visited = new Set();
+                    let cur = co;
+                    while (cur.parent && cur.parent !== 'player') {
+                        if (visited.has(cur.id)) break;
+                        visited.add(cur.id);
+                        let par = companies.find(cx => cx.id === cur.parent);
+                        if (!par) break;
+                        cur = par;
+                    }
+                    return cur;
+                }
+
+                // ツリーノードHTMLを再帰生成
+                function _buildTreeNode(co, currentId, depth) {
+                    let isCurrent = co.id === currentId;
+                    let cleanName = co.name.replace(/\[.*?\]\s*/g, '');
+                    let badge = window.getCountryBadge ? window.getCountryBadge(co.country) : '';
+                    let sectorLabel = sectors[co.sector]?.n || '';
+                    let cap = co.marketCap >= 1e8 ? (co.marketCap/1e8).toFixed(1)+'億' : Math.floor(co.marketCap/1e4).toLocaleString()+'万';
+                    let playerOwn = co.shareholders && co.shareholders['player'] ? ((co.shareholders['player']/co.shares)*100).toFixed(1) : '0';
+
+                    // 子会社を取得（直接子のみ）
+                    let children = companies.filter(cx =>
+                        cx.parent === co.id ||
+                        (cx.shareholders && cx.shareholders[co.id] && co.shares > 0 && (cx.shareholders[co.id]/cx.shares) > 0.5 && cx.parent !== 'player')
+                    );
+
+                    // 現在の企業ハイライト色
+                    let bgColor = isCurrent ? 'linear-gradient(135deg,#eff6ff,#dbeafe)' : '#fff';
+                    let borderColor = isCurrent ? '#2563eb' : '#e2e8f0';
+                    let leftBorder = isCurrent ? '4px solid #2563eb' : '2px solid #e2e8f0';
+
+                    // クリックアクション: 株式取引画面に飛ぶ or 詳細開く
+                    let onclick = co.isPublic
+                        ? `window._companyModalTab='profile'; closeModal('company-modal'); window._marketSelectedId='${co.id}'; currentMarketSector='${co.sector}'; document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active')); document.getElementById('nav-market')?.classList.add('active'); document.querySelectorAll('.view-section').forEach(v=>v.classList.remove('active')); document.getElementById('view-market')?.classList.add('active'); updateMarket();`
+                        : `window._companyModalTab='profile'; openCompanyModal('${co.id}');`;
+
+                    let nodeHtml = `
+                    <div style="margin-left:${depth*20}px; margin-bottom:8px;">
+                        ${depth > 0 ? `<div style="margin-left:-10px; border-left:2px dashed #cbd5e1; height:12px; width:12px; border-bottom:2px dashed #cbd5e1; display:inline-block; margin-right:4px; vertical-align:middle; margin-bottom:-4px;"></div>` : ''}
+                        <div onclick="${onclick}"
+                             style="display:inline-flex; align-items:center; gap:10px; background:${bgColor};
+                                    border:1px solid ${borderColor}; border-left:${leftBorder};
+                                    border-radius:10px; padding:10px 14px; cursor:pointer;
+                                    box-shadow:${isCurrent?'0 2px 8px rgba(37,99,235,0.2)':'0 1px 3px rgba(0,0,0,0.05)'};
+                                    transition:0.15s; width:calc(100% - ${depth*20}px - 20px); box-sizing:border-box;">
+                            <div style="font-size:20px; flex-shrink:0;">${co.icon || '🏢'}</div>
+                            <div style="flex:1; min-width:0;">
+                                <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap; margin-bottom:2px;">
+                                    ${isCurrent ? '<span style="font-size:9px;background:#2563eb;color:#fff;padding:1px 5px;border-radius:4px;font-weight:900;">👁 表示中</span>' : ''}
+                                    <span style="font-size:9px;background:#f1f5f9;color:#64748b;padding:1px 5px;border-radius:4px;">${sectorLabel}</span>
+                                    ${parseFloat(playerOwn) > 0 ? `<span style="font-size:9px;background:#dcfce7;color:#166534;padding:1px 5px;border-radius:4px;font-weight:900;">自社 ${playerOwn}%</span>` : ''}
+                                </div>
+                                <div style="font-weight:900; font-size:14px; color:#1e293b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${badge} ${cleanName}</div>
+                                <div style="font-size:11px; color:#64748b; margin-top:2px;">株価 ¥${co.stockPrice.toLocaleString()} / 時価総額 ¥${cap}</div>
+                            </div>
+                            ${co.isPublic ? '<div style="font-size:16px; flex-shrink:0; color:#94a3b8;">📈</div>' : '<div style="font-size:16px; flex-shrink:0; color:#94a3b8;">🔒</div>'}
+                        </div>
+                    </div>`;
+
+                    // 再帰で子を描画
+                    children.forEach(child => {
+                        nodeHtml += _buildTreeNode(child, currentId, depth + 1);
+                    });
+
+                    return nodeHtml;
+                }
+
+                let root = _findRoot(target);
+                let isStandalone = !target.parent && companies.filter(cx =>
+                    cx.parent === target.id ||
+                    (cx.shareholders && cx.shareholders[target.id] && (cx.shareholders[target.id]/(cx.shares||1)) > 0.5)
+                ).length === 0;
+
+                let groupTitle = isStandalone
+                    ? `${root.name.replace(/\[.*?\]\s*/g,'')}（独立企業）`
+                    : `${root.name.replace(/\[.*?\]\s*/g,'')} グループ`;
+
+                document.getElementById('company-modal-desc').innerHTML = `
+                <div style="margin-bottom:16px;">
+                    <div style="font-size:11px;color:#64748b;font-weight:700;letter-spacing:1px;margin-bottom:6px;">🏢 ${groupTitle}</div>
+                    <div style="font-size:11px;color:#94a3b8;margin-bottom:12px;">📈 マークをクリックすると株式取引画面へ移動します</div>
+                    <div style="padding:4px 0;">
+                        ${_buildTreeNode(root, cid, 0)}
                     </div>
                 </div>`;
             }
@@ -8521,4 +8617,3 @@ ${ds.desc}`)) {
 </body>
 
 </html>
-
