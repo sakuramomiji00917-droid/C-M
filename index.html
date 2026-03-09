@@ -2693,7 +2693,10 @@
                             && cx.sector !== 'ad' && cx.cash > 50000000
                         );
                         if (rescuer.length > 0) {
-                            let buyer = rescuer[Math.floor(Math.random() * rescuer.length)];
+                            // 同業者を優先（同セクターが居れば70%の確率でそちらから選ぶ）
+                            let sameSector = rescuer.filter(cx => cx.sector === c.sector);
+                            let buyerPool = (sameSector.length > 0 && Math.random() < 0.70) ? sameSector : rescuer;
+                            let buyer = buyerPool[Math.floor(Math.random() * buyerPool.length)];
                             // 救済買収処理
                             let totalDebt = Object.values(c.bankDebts || {}).reduce((s,v)=>s+v,0);
                             // 子会社の全資産を売却して返済
@@ -5577,7 +5580,8 @@ ${ds.desc}`)) {
             if (!container) return;
             let subs = companies.filter(c => c.parent === 'player');
 
-            if (subs.length === 0) {
+            let bankruptProcExists = companies.some(cx => cx._bankruptProc && !cx.isBankrupt && cx.id !== 'player');
+            if (subs.length === 0 && !bankruptProcExists) {
                 container.innerHTML = `
                     <div class="flex-between" style="margin-bottom:24px; border-bottom:3px solid var(--primary); padding-bottom:12px;">
                         <h2 style="margin:0;"><span style="font-size:24px;">🤝</span> 子会社管理</h2>
@@ -5590,10 +5594,57 @@ ${ds.desc}`)) {
                 return;
             }
 
+            // ── 破産申請中企業（救済買収候補）──
+            let bankruptCandidates = companies.filter(cx =>
+                cx._bankruptProc && !cx.isBankrupt && cx.id !== 'player'
+            );
+            let rescueHtml = '';
+            if (bankruptCandidates.length > 0) {
+                rescueHtml = `<div style="margin-bottom:28px;">
+                <h3 style="border-bottom:2px solid var(--danger);padding-bottom:8px;margin-bottom:14px;color:var(--danger);">🆘 破産申請中企業（救済買収チャンス）</h3>
+                <div class="grid-2">` +
+                bankruptCandidates.map(cx => {
+                    let procWeeks = week - (cx._bankruptProcWeek || week);
+                    let remaining = Math.max(0, 4 - procWeeks);
+                    let totalDebt = Object.values(cx.bankDebts || {}).reduce((s,v)=>s+v,0);
+                    let assets = Object.values(cx.deposits||{}).reduce((s,v)=>s+v,0)
+                        + (cx.termDeposits||[]).reduce((s,td)=>s+td.amount,0)
+                        + Math.max(0, cx.cash);
+                    let netDebt = Math.max(0, totalDebt - assets);
+                    let sectorIcon = {coffee:'☕',bank:'🏦',re:'🏢',log:'🚚',it:'💻',ins:'🛡️',sogo:'🏬',ad:'📣'}[cx.sector]||'🏭';
+                    return `<div class="card" style="border-top:4px solid var(--danger);">
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
+                            <div>
+                                <div style="font-size:11px;color:var(--danger);font-weight:900;">⚠️ 破産申請中 残${remaining}週</div>
+                                <h3 style="margin:4px 0;font-size:16px;">${sectorIcon} ${cx.name.replace(/\[.*?\]\s*/,'')}</h3>
+                                <div style="font-size:11px;color:var(--text-mut);">${cx.country||'JP'} | ${cx.sector}</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="font-size:10px;color:var(--text-mut);">時価総額</div>
+                                <b>¥${Math.floor(cx.marketCap/10000).toLocaleString()}万</b>
+                            </div>
+                        </div>
+                        <div style="background:#fff5f5;border:1px solid #fecaca;border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;line-height:1.8;">
+                            <div class="flex-between"><span>💴 手元資金:</span><b style="color:${cx.cash>=0?'var(--success)':'var(--danger)'};">¥${Math.floor(cx.cash/10000).toLocaleString()}万</b></div>
+                            <div class="flex-between"><span>🏦 借入総額:</span><b style="color:var(--danger);">¥${Math.floor(totalDebt/10000).toLocaleString()}万</b></div>
+                            <div class="flex-between"><span>💸 肩代わり必要額:</span><b style="color:var(--danger);font-weight:900;">¥${Math.floor(netDebt/10000).toLocaleString()}万</b></div>
+                            ${cx.sector==='coffee'?`<div class="flex-between"><span>🏪 店舗数:</span><b>${cx.stores.length}店舗</b></div>`:''}
+                        </div>
+                        <div style="font-size:11px;color:#7c3aed;background:#f5f3ff;border-radius:6px;padding:8px;margin-bottom:10px;">
+                            💡 救済買収すると: 子会社として傘下に入り、借金は国内銀行が肩代わり（週5%ずつ自社が返済）
+                        </div>
+                        <button class="btn-danger" style="width:100%;font-weight:900;" onclick="playerRescueAcquisition('${cx.id}')">
+                            🆘 救済買収する
+                        </button>
+                    </div>`;
+                }).join('') + `</div></div>`;
+            }
+
             let html = `
                 <div class="flex-between" style="margin-bottom:24px; border-bottom:3px solid var(--primary); padding-bottom:12px;">
                     <h2 style="margin:0;"><span style="font-size:24px;">🤝</span> 子会社管理</h2>
                 </div>
+                ${rescueHtml}
                 <div class="grid-2">
             `;
             subs.forEach(sub => {
@@ -5623,6 +5674,39 @@ ${ds.desc}`)) {
             });
             html += `</div>`;
             container.innerHTML = html;
+        };
+
+        window.playerRescueAcquisition = function(targetId) {
+            let p = companies[0];
+            let cx = companies.find(x => x.id === targetId);
+            if (!cx || !cx._bankruptProc || cx.isBankrupt) return alert('この企業はすでに買収できない状態です。');
+
+            let totalDebt = Object.values(cx.bankDebts || {}).reduce((s,v)=>s+v,0);
+            let assets = Object.values(cx.deposits||{}).reduce((s,v)=>s+v,0)
+                + (cx.termDeposits||[]).reduce((s,td)=>s+td.amount,0)
+                + Math.max(0, cx.cash);
+            let netDebt = Math.max(0, totalDebt - assets);
+            let cName = cx.name.replace(/\[.*?\]\s*/,'');
+
+            if (!confirm(`【救済買収】${cName} を傘下に収めますか？\n\n肩代わり負債: ¥${Math.floor(netDebt/10000).toLocaleString()}万\n（銀行肩代わり後、毎週5%ずつ自社が返済）\n\n※ 買収コストは象徴的な1円です。`)) return;
+
+            // 資産売却で返済
+            cx.termDeposits = []; cx.deposits = {};
+            let remaining = netDebt;
+            let cCountry = cx.country || 'JP';
+            let guarantorBank = companies.find(bk => bk.sector === 'bank' && !bk.isBankrupt && (bk.country === cCountry || !bk.country));
+            cx.bankDebts = {};
+            if (remaining > 0 && guarantorBank) {
+                guarantorBank.cash -= remaining;
+                cx._guarantorDebt = { bankId: guarantorBank.id, amount: remaining };
+                addLog(`【銀行肩代わり】${guarantorBank.name.replace(/\[.*?\]\s*/,'')} が再建中の ${cName} の借金を肩代わり。残債：¥${Math.floor(remaining/10000).toLocaleString()}万`, 'warning', '経済');
+            }
+            cx.parent = 'player';
+            cx.name = '[再建中] ' + cName;
+            delete cx._bankruptProc; delete cx._bankruptProcWeek;
+            addLog(`【救済買収】${cName} をプレイヤーが救済買収しました！傘下として再建スタート。`, 'success', 'M&A');
+            updateDashboard();
+            renderSubsidiaryList();
         };
 
         window.subActionSiphonCash = function (subId) {
@@ -7873,4 +7957,3 @@ ${ds.desc}`)) {
 </body>
 
 </html>
-
