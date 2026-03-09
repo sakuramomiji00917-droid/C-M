@@ -707,6 +707,13 @@
         <button id="btn-portfolio-detail-mobile" onclick="openPortfolioDetailModal()" style="background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.3); color:#fff; font-size:11px; padding:4px 8px; border-radius:8px; font-weight:bold; white-space:nowrap;">📊 資産</button>
     </div>
     </div>
+    <!-- 🚨 敵対的買収警告バナー -->
+    <div id="hostile-takeover-banner" style="display:none; background:linear-gradient(90deg,#dc2626,#991b1b); color:#fff; padding:8px 15px; font-size:12px; font-weight:bold; text-align:center; cursor:pointer; animation: pulseBanner 1.2s infinite;" onclick="openHostileDefenseModal()">
+        ⚠️ <span id="hostile-banner-text">敵対的買収警告</span> ― タップして防衛策を確認
+    </div>
+    <style>
+        @keyframes pulseBanner { 0%,100%{opacity:1;} 50%{opacity:0.6;} }
+    </style>
 
     <div class="sidebar">
         <div class="sidebar-header">Global M&A Sim</div>
@@ -1522,6 +1529,31 @@
             else p.creditRating = "B";
 
             if (document.getElementById('view-market')?.classList.contains('active')) updateMarket();
+
+            // 🚨 敵対的買収バナー更新
+            if (p.isPublic) {
+                let otherKeys = Object.keys(p.shareholders).filter(k => k !== 'player');
+                let stolenShares = otherKeys.reduce((s, k) => s + (p.shareholders[k] || 0), 0);
+                let stolenPct = p.shares > 0 ? stolenShares / p.shares : 0;
+                let banner = document.getElementById('hostile-takeover-banner');
+                let bannerText = document.getElementById('hostile-banner-text');
+                if (banner) {
+                    if (stolenPct >= 0.35) {
+                        banner.style.display = 'block';
+                        banner.style.background = 'linear-gradient(90deg,#7f1d1d,#dc2626)';
+                        if (bannerText) bannerText.textContent = `🔴 最終警告！自社株${(stolenPct*100).toFixed(1)}%が敵対勢力に！即座に自社株買いで防衛を！`;
+                    } else if (stolenPct >= 0.20) {
+                        banner.style.display = 'block';
+                        banner.style.background = 'linear-gradient(90deg,#b45309,#d97706)';
+                        if (bannerText) bannerText.textContent = `⚠️ 自社株${(stolenPct*100).toFixed(1)}%が買い集められています。防衛を検討してください`;
+                    } else {
+                        banner.style.display = 'none';
+                    }
+                }
+            } else {
+                let banner = document.getElementById('hostile-takeover-banner');
+                if (banner) banner.style.display = 'none';
+            }
         };
 
         window.addLog = function (msg, type = 'normal', category = '総合') {
@@ -1535,6 +1567,148 @@
 
         // showMarketAlert は互換性のためstub化（旧コードから呼ばれても何もしない）
         window.showMarketAlert = function() {};
+
+        // 🛡 敵対的買収防衛モーダル
+        window.openHostileDefenseModal = function() {
+            let p = companies[0];
+            let otherKeys = Object.keys(p.shareholders).filter(k => k !== 'player');
+            let stolenShares = otherKeys.reduce((s, k) => s + (p.shareholders[k]||0), 0);
+            let stolenPct = p.shares > 0 ? stolenShares / p.shares : 0;
+            let playerPct = p.shares > 0 ? (p.shareholders['player']||0) / p.shares : 0;
+
+            // 最大敵対株主を特定
+            let topEnemy = otherKeys.sort((a,b)=>(p.shareholders[b]||0)-(p.shareholders[a]||0))[0];
+            let topEnCo = topEnemy ? companies.find(cx => cx.id === topEnemy) : null;
+            let topEnName = topEnCo ? topEnCo.name.replace(/\[.*?\]\s*/,'') : '不明';
+            let topEnPct = topEnemy && p.shares > 0 ? ((p.shareholders[topEnemy]||0)/p.shares*100).toFixed(1) : '0';
+
+            // 自社株買い費用計算
+            let buyback100 = Math.floor(p.stockPrice * p.shares * 0.05); // 5%買い戻し費用
+
+            let dangerColor = stolenPct >= 0.35 ? '#dc2626' : '#d97706';
+            let modalId = 'hostile-defense-modal';
+            let existing = document.getElementById(modalId);
+            if (existing) existing.remove();
+
+            let div = document.createElement('div');
+            div.id = modalId;
+            div.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center;';
+            div.innerHTML = `
+                <div style="background:#fff;border-radius:16px;padding:24px;max-width:420px;width:92%;max-height:90vh;overflow-y:auto;border-top:6px solid ${dangerColor};">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                        <h2 style="margin:0;color:${dangerColor};">🛡 敵対的買収・防衛センター</h2>
+                        <button onclick="document.getElementById('${modalId}').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;">✕</button>
+                    </div>
+
+                    <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:14px;margin-bottom:16px;">
+                        <div style="font-size:13px;line-height:1.9;">
+                            <div style="display:flex;justify-content:space-between;"><span>⚠️ 外部保有率:</span><b style="color:${dangerColor};">${(stolenPct*100).toFixed(1)}%</b></div>
+                            <div style="display:flex;justify-content:space-between;"><span>👑 自分の保有率:</span><b style="color:var(--success);">${(playerPct*100).toFixed(1)}%</b></div>
+                            <div style="display:flex;justify-content:space-between;"><span>🎯 最大敵対株主:</span><b>${topEnName} (${topEnPct}%)</b></div>
+                        </div>
+                        <div style="margin-top:10px;height:8px;background:#fee2e2;border-radius:4px;overflow:hidden;">
+                            <div style="width:${Math.min(100,stolenPct*100)}%;height:100%;background:${dangerColor};border-radius:4px;transition:width 0.3s;"></div>
+                        </div>
+                        <div style="font-size:10px;color:var(--text-mut);margin-top:4px;">50%を超えるとゲームオーバー</div>
+                    </div>
+
+                    <h3 style="margin:0 0 12px;font-size:14px;">🛡 防衛手段を選択</h3>
+
+                    <div style="display:flex;flex-direction:column;gap:10px;">
+                        <div style="border:1px solid var(--border);border-radius:10px;padding:12px;">
+                            <b>① 自社株買い（5%分）</b>
+                            <div style="font-size:12px;color:var(--text-mut);margin:4px 0;">費用: ¥${Math.floor(buyback100/10000).toLocaleString()}万 / 外部保有率を下げる最も確実な手段</div>
+                            <button onclick="execBuyback5pct('${modalId}')" style="width:100%;margin-top:8px;padding:10px;background:#3b82f6;color:#fff;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">
+                                💰 自社株を5%買い戻す (¥${Math.floor(buyback100/10000).toLocaleString()}万)
+                            </button>
+                        </div>
+
+                        <div style="border:1px solid var(--border);border-radius:10px;padding:12px;">
+                            <b>② ポイズンピル発動</b>
+                            <div style="font-size:12px;color:var(--text-mut);margin:4px 0;">費用: ¥3,000万 / 新株を大量発行して外部保有率を希薄化（一時的に株価下落）</div>
+                            <button onclick="execPoisonPill('${modalId}')" style="width:100%;margin-top:8px;padding:10px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-weight:bold;cursor:pointer;${p.cash < 30000000?'opacity:0.5;pointer-events:none;':''}">
+                                💉 ポイズンピルを発動 (¥3,000万)
+                            </button>
+                        </div>
+
+                        <div style="border:1px solid var(--border);border-radius:10px;padding:12px;">
+                            <b>③ ホワイトナイト招集</b>
+                            <div style="font-size:12px;color:var(--text-mut);margin:4px 0;">友好的な大企業に株を引き受けてもらう（子会社化リスクあり）</div>
+                            <button onclick="execWhiteKnight('${modalId}')" style="width:100%;margin-top:8px;padding:10px;background:#059669;color:#fff;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">
+                                🤝 ホワイトナイトを招集
+                            </button>
+                        </div>
+                    </div>
+                </div>`;
+            document.body.appendChild(div);
+        };
+
+        // 自社株買い5%
+        window.execBuyback5pct = function(modalId) {
+            let p = companies[0];
+            let buyAmt = Math.floor(p.shares * 0.05);
+            let cost = buyAmt * p.stockPrice;
+            if (p.cash < cost) return alert(`資金不足です。必要: ¥${Math.floor(cost/10000).toLocaleString()}万`);
+            // 外部株主から按分で買い戻す
+            let otherKeys = Object.keys(p.shareholders).filter(k => k !== 'player');
+            let totalOther = otherKeys.reduce((s,k)=>s+(p.shareholders[k]||0),0);
+            if (totalOther <= 0) return alert('買い戻せる外部株がありません。');
+            let actualBuy = Math.min(buyAmt, totalOther);
+            otherKeys.forEach(k => {
+                let share = (p.shareholders[k]||0) / totalOther;
+                let reduce = Math.floor(actualBuy * share);
+                p.shareholders[k] = Math.max(0, (p.shareholders[k]||0) - reduce);
+            });
+            p.shareholders['player'] = (p.shareholders['player']||0) + actualBuy;
+            p.cash -= cost;
+            addLog(`【防衛】自社株買い実施。${actualBuy.toLocaleString()}株(5%)を ¥${Math.floor(cost/10000).toLocaleString()}万 で買い戻しました。`, 'success', 'M&A');
+            if (modalId) { let m = document.getElementById(modalId); if(m) m.remove(); }
+            updateDashboard();
+        };
+
+        // ポイズンピル
+        window.execPoisonPill = function(modalId) {
+            let p = companies[0];
+            if (p.cash < 30000000) return alert('資金不足です（¥3,000万必要）');
+            if (!confirm('新株を30%増発します。外部保有率は下がりますが、株価も一時下落します。実行しますか？')) return;
+            let newShares = Math.floor(p.shares * 0.30);
+            p.shares += newShares;
+            p.shareholders['player'] = (p.shareholders['player']||0) + newShares;
+            p.cash -= 30000000;
+            p.stockPrice = Math.floor(p.stockPrice * 0.82); // 株価-18%
+            p.marketCap = p.stockPrice * p.shares;
+            addLog(`【防衛】ポイズンピル発動。新株${newShares.toLocaleString()}株を発行。外部保有比率を希薄化しました（株価-18%）。`, 'success', 'M&A');
+            if (modalId) { let m = document.getElementById(modalId); if(m) m.remove(); }
+            updateDashboard();
+        };
+
+        // ホワイトナイト
+        window.execWhiteKnight = function(modalId) {
+            let p = companies[0];
+            let knight = companies.filter(cx => cx.id !== 'player' && !cx.isBankrupt && cx.cash > 500000000 && cx.sector !== 'ad').sort((a,b)=>b.cash-a.cash)[0];
+            if (!knight) return alert('現在ホワイトナイトになれる企業が見つかりません。');
+            if (!confirm(`${knight.name.replace(/\[.*?\]\s*/,'')} に自社株10%を引き受けてもらいます。友好的な大株主として経営を安定させます（子会社化はされません）。実行しますか？`)) return;
+            let knightShares = Math.floor(p.shares * 0.10);
+            let cost = knightShares * p.stockPrice;
+            // 敵対株主から10%分を移す
+            let otherKeys = Object.keys(p.shareholders).filter(k => k !== 'player' && k !== knight.id);
+            let totalOther = otherKeys.reduce((s,k)=>s+(p.shareholders[k]||0),0);
+            if (totalOther >= knightShares) {
+                let remain = knightShares;
+                otherKeys.forEach(k => {
+                    if (remain <= 0) return;
+                    let take = Math.min(p.shareholders[k]||0, Math.floor(knightShares * ((p.shareholders[k]||0)/totalOther)));
+                    p.shareholders[k] = Math.max(0, (p.shareholders[k]||0) - take);
+                    remain -= take;
+                });
+            }
+            knight.cash -= cost;
+            p.cash += cost;
+            p.shareholders[knight.id] = (p.shareholders[knight.id]||0) + knightShares;
+            addLog(`【防衛】ホワイトナイト成立。${knight.name.replace(/\[.*?\]\s*/,'')} が自社の友好的大株主(10%)になりました。`, 'success', 'M&A');
+            if (modalId) { let m = document.getElementById(modalId); if(m) m.remove(); }
+            updateDashboard();
+        };
 
         // ==========================================
         // 📰 週次ニュース画面（Coffee Inc 2スタイル）
@@ -3024,7 +3198,7 @@
             });
 
             playerTotalDividends += pDiv; p.cash += pDiv;
-            let maxOtherShare = Math.max(...Object.keys(p.shareholders).filter(k => k !== 'player').map(k => p.shareholders[k])); if (maxOtherShare > p.shares * 0.5) { isGameOver = true; alert("【GAME OVER】特定の企業に株式の過半数を握られ、買収されました。"); }
+            if (p.isPublic) { let otherKeys = Object.keys(p.shareholders).filter(k => k !== 'player'); let maxOtherShare = otherKeys.length > 0 ? Math.max(...otherKeys.map(k => p.shareholders[k])) : 0; if (maxOtherShare > p.shares * 0.5) { isGameOver = true; alert("【GAME OVER】特定の企業に株式の過半数を握られ、買収されました。"); } }
 
             // 🔄 企業の新陳代謝（コーヒー以外のみ新規参入）
             if (Math.random() < 0.2) {
@@ -3521,10 +3695,12 @@
                 if (stolenPct >= 0.2 && stolenPct < 0.35 && !p.tobWarning1) {
                     addLog(`【緊急警告】どこかの投資家が自社の株式を20%以上買い集めています！経営権が狙われています！`, 'alert', 'M&A');
                     p.tobWarning1 = true;
+                    setTimeout(() => openHostileDefenseModal(), 300);
                 }
                 if (stolenPct >= 0.35 && stolenPct < 0.5 && !p.tobWarning2) {
-                    addLog(`【最終警告】自社株の35%以上が握られました！51%を取られると買収され【ゲームオーバー】になります！至急、市場で自社株を買い戻して防衛してください！`, 'alert', 'M&A');
+                    addLog(`【最終警告】自社株の35%以上が握られました！51%を取られると買収され【ゲームオーバー】になります！至急、防衛センターで対策を！`, 'alert', 'M&A');
                     p.tobWarning2 = true;
+                    setTimeout(() => openHostileDefenseModal(), 300);
                 }
             }
         }; /// ==========================================
